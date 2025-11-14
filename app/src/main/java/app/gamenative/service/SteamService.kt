@@ -32,7 +32,6 @@ import app.gamenative.db.dao.SteamAppDao
 import app.gamenative.db.dao.SteamFriendDao
 import app.gamenative.db.dao.SteamLicenseDao
 import app.gamenative.db.dao.CachedLicenseDao
-import app.gamenative.db.dao.DepotManifestDao
 import app.gamenative.enums.LoginResult
 import app.gamenative.enums.OS
 import app.gamenative.enums.OSArch
@@ -149,13 +148,13 @@ import app.gamenative.utils.FileUtils
 import app.gamenative.utils.MarkerUtils
 import app.gamenative.utils.LicenseSerializer
 import app.gamenative.data.CachedLicense
-import app.gamenative.data.CachedDepotManifest
 import com.winlator.container.Container
 import `in`.dragonbra.javasteam.depotdownloader.data.AppItem
 import `in`.dragonbra.javasteam.depotdownloader.data.DownloadItem
 import `in`.dragonbra.javasteam.steam.handlers.steamapps.License
 import `in`.dragonbra.javasteam.steam.handlers.steamuser.callback.PlayingSessionStateCallback
 import `in`.dragonbra.javasteam.steam.steamclient.AsyncJobFailedException
+import `in`.dragonbra.javasteam.types.DepotManifest
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -198,9 +197,6 @@ class SteamService : Service(), IChallengeUrlChanged {
 
     @Inject
     lateinit var cachedLicenseDao: CachedLicenseDao
-
-    @Inject
-    lateinit var depotManifestDao: DepotManifestDao
 
     private lateinit var notificationHelper: NotificationHelper
 
@@ -719,11 +715,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                     if (mi.size > largestDepotSize) largestDepotSize = mi.size
 
                     // Check cache first
-                    val cachedManifest = runBlocking {
-                        instance?.depotManifestDao?.getManifest(depot.depotId, mi.gid)
-                    }
-
-                    val man = LicenseSerializer.deserializeManifest(cachedManifest!!.manifestJson)
+                    val man = DepotManifest.loadFromFile("${defaultAppInstallPath}/$installDir/.DepotDownloader/${depot.depotId}_${mi.gid}.manifest")
 
                     Timber.d("Using manifest for depot ${depot.depotId}  size=${mi.size}")
 
@@ -1026,7 +1018,8 @@ class SteamService : Service(), IChallengeUrlChanged {
 
                         // Create AppItem with only mandatory appId
                         val appItem = AppItem(appId,
-                            installDirectory = "/data/data/app.gamenative/Steam",
+                            installDirectory = defaultAppInstallPath,
+                            installToGameNameDirectory = true,
                             depot = entitledDepotIds)
 
                         // Add item to downloader
