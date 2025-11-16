@@ -359,10 +359,10 @@ object SteamUtils {
         try {
             val imageFs = ImageFs.find(context)
             val appDirPath = SteamService.getAppDirPath(steamAppId)
-            val executablePath = SteamService.getInstalledExe(steamAppId)
 
             // Convert to Wine path format
             val container = ContainerUtils.getContainer(context, "STEAM_$steamAppId")
+            val executablePath = container.executablePath
             val drives = container.drives
             val driveIndex = drives.indexOf(appDirPath)
             val drive = if (driveIndex > 1) {
