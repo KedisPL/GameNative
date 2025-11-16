@@ -604,10 +604,10 @@ fun AppScreen(
     if (showCreateShortcutDialog) {
         AlertDialog(
             onDismissRequest = { showCreateShortcutDialog = false },
-            title = { Text("Create shortcut") },
+            title = { Text(stringResource(R.string.create_shortcut)) },
             text = {
                 Column {
-                    Text(text = "Label")
+                    Text(text = stringResource(R.string.label))
                     TextField(
                         value = shortcutLabel,
                         onValueChange = { shortcutLabel = it },
@@ -615,7 +615,7 @@ fun AppScreen(
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "Icon")
+                        Text(text = stringResource(R.string.icon))
                         Spacer(Modifier.width(12.dp))
                         CoilImage(
                             imageModel = { appInfo.iconUrl },
@@ -640,10 +640,10 @@ fun AppScreen(
                         }
                         showCreateShortcutDialog = false
                     }
-                }) { Text("Create") }
+                }) { Text(stringResource(R.string.create)) }
             },
             dismissButton = {
-                OutlinedButton(onClick = { showCreateShortcutDialog = false }) { Text("Cancel") }
+                OutlinedButton(onClick = { showCreateShortcutDialog = false }) { Text(stringResource(R.string.cancel)) }
             }
         )
     }
@@ -1355,7 +1355,7 @@ private fun AppScreenContent(
                             ),
                             contentPadding = PaddingValues(12.dp)
                         ) {
-                            Text("Update Now", color = MaterialTheme.colorScheme.onTertiary)
+                            Text(stringResource(R.string.update_now), color = MaterialTheme.colorScheme.onTertiary)
                         }
                     }
                 }
@@ -1550,7 +1550,7 @@ internal fun GameMigrationDialog(
             // We don't allow dismissal during move.
         },
         icon = { Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null) },
-        title = { Text(text = "Moving Files") },
+        title = { Text(text = stringResource(R.string.moving_files)) },
         text = {
             Column(
                 modifier = Modifier
