@@ -16,6 +16,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executors;
 
+import timber.log.Timber;
+
 public abstract class ProcessHelper {
     public static final boolean PRINT_DEBUG = true; // FIXME change to false
     private static final ArrayList<Callback<String>> debugCallbacks = new ArrayList<>();
@@ -23,6 +25,20 @@ public abstract class ProcessHelper {
     private static final byte SIGSTOP = 19;
     private static final byte SIGTERM = 15;
     private static final byte SIGKILL = 9;
+
+    public static int getPid(java.lang.Process p) {
+        if (p == null) return -1;
+        try {
+            Field f = p.getClass().getDeclaredField("pid");
+            f.setAccessible(true);
+            int pid = f.getInt(p);
+            f.setAccessible(false);
+            return pid;
+        } catch (Exception e) {
+            Timber.tag("ProcessHelper").e(e, "Failed to get PID from process object");
+            return -1;
+        }
+    }
 
     public static void suspendProcess(int pid) {
         Process.sendSignal(pid, SIGSTOP);

@@ -2,25 +2,19 @@ package com.winlator.xenvironment.components;
 
 import android.app.Service;
 import android.content.Context;
-import android.content.SharedPreferences;
-import android.media.Image;
 import android.net.ConnectivityManager;
-import android.net.InetAddresses;
-import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
-import android.provider.ContactsContract;
 import android.util.Log;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 
 import com.winlator.PrefManager;
-
 import com.winlator.box86_64.Box86_64Preset;
 import com.winlator.box86_64.Box86_64PresetManager;
 import com.winlator.container.Container;
-import com.winlator.container.Shortcut;
 import com.winlator.contents.ContentProfile;
 import com.winlator.contents.ContentsManager;
 import com.winlator.core.Callback;
@@ -33,17 +27,14 @@ import com.winlator.core.TarCompressorUtils;
 import com.winlator.core.WineInfo;
 import com.winlator.fexcore.FEXCorePreset;
 import com.winlator.fexcore.FEXCorePresetManager;
-import com.winlator.sysvshm.SysVSHMConnectionHandler;
-import com.winlator.sysvshm.SysVSHMRequestHandler;
-import com.winlator.sysvshm.SysVSharedMemory;
 import com.winlator.xconnector.UnixSocketConfig;
-import com.winlator.xconnector.XConnectorEpoll;
 import com.winlator.xenvironment.ImageFs;
 
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.io.RandomAccessFile;
 import java.net.InetAddress;
 import java.util.ArrayList;
@@ -67,6 +58,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
     private boolean wow64Mode = true;
     private final ContentsManager contentsManager;
     private final ContentProfile wineProfile;
+    private final List<String> mountedPaths = new ArrayList<>();
     private Container container;
     private File workingDir;
 
@@ -87,14 +79,20 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
 
     private Runnable preUnpack;
     public void setPreUnpack(Runnable r) { this.preUnpack = r; }
+
     @Override
     public void start() {
         synchronized (lock) {
+            // Note: Stale root session recovery is now handled in XEnvironment.startEnvironmentComponents
+            // to ensure it happens before SysV/PulseAudio components start.
+
             if (wineInfo.isArm64EC())
                 extractEmulatorsDlls();
             else
                 extractBox64Files();
+
             if (preUnpack != null) preUnpack.run();
+
             PluviaApp.events.emitJava(new AndroidEvent.SetBootingSplashText("Launching game..."));
             pid = execGuestProgram();
             Log.d("BionicProgramLauncherComponent", "Process " + pid + " started");
@@ -176,6 +174,143 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         this.workingDir = workingDir;
     }
 
+    private void cleanupRootMounts() {
+        if (mountedPaths.isEmpty() || !FileUtils.isRootAvailable()) {
+            return;
+        }
+
+        StringBuilder scriptContent = new StringBuilder("#!/system/bin/sh\n");
+        for (String path : mountedPaths) {
+            scriptContent.append("/system/bin/umount -l '").append(path.replace("'", "'\\''")).append("'\n");
+        }
+
+        int appUid = environment.getContext().getApplicationInfo().uid;
+        File winePrefix = new File(container.getRootDir(), ".wine");
+        scriptContent.append("/system/bin/chown -R ").append(appUid).append(":").append(appUid).append(" '").append(winePrefix.getAbsolutePath().replace("'", "'\\''")).append("'\n");
+
+        try {
+            java.lang.Process process = Runtime.getRuntime().exec("su");
+            try (OutputStreamWriter writer = new OutputStreamWriter(process.getOutputStream())) {
+                writer.write(scriptContent.toString());
+                writer.flush();
+                writer.write("exit\n");
+                writer.flush();
+            }
+            process.waitFor();
+            Log.i("BionicProgramLauncherComponent", "Successfully executed cleanup script.");
+        } catch (Exception e) {
+            Log.e("BionicProgramLauncherComponent", "Failed to execute cleanup script", e);
+        } finally {
+            mountedPaths.clear();
+        }
+    }
+
+    private int execAsRoot(String baseCommand, EnvVars envVars, File rootDir) {
+        if (!FileUtils.isRootAvailable()) {
+            new Handler(Looper.getMainLooper()).post(() ->
+                    Toast.makeText(environment.getContext(), "Root access is enabled but not available.", Toast.LENGTH_LONG).show());
+            return -1;
+        }
+
+        ImageFs imageFs = environment.getImageFs();
+        File mntDir = new File(imageFs.getRootDir(), "mnt");
+        if (!mntDir.exists()) {
+            mntDir.mkdirs();
+        }
+
+        StringBuilder scriptContent = new StringBuilder();
+        scriptContent.append("cd '").append(rootDir.getAbsolutePath().replace("'", "'\\''")).append("' || exit 1\n");
+
+        // Kill stale wineservers to prevent conflicts
+        String wineBin = imageFs.getWinePath() + "/bin/wineserver";
+        scriptContent.append("'").append(wineBin).append("' -k\n");
+        scriptContent.append("pkill -9 wineserver\n");
+
+        String appDataPath = environment.getContext().getApplicationInfo().dataDir;
+        for (String[] drive : container.drivesIterator()) {
+            String path = drive[1];
+            if (!path.startsWith(appDataPath) && !path.trim().isEmpty()) {
+                File sourceDir = new File(path);
+                if (sourceDir.exists() && sourceDir.isDirectory()) {
+                    File mountPoint = new File(mntDir, drive[0]);
+
+                    scriptContent.append("/system/bin/umount -l '")
+                            .append(mountPoint.getAbsolutePath().replace("'", "'\\''"))
+                            .append("' >/dev/null 2>&1\n");
+
+                    if (!mountPoint.exists()) {
+                        mountPoint.mkdirs();
+                    }
+                    scriptContent.append("/system/bin/mount -o bind '")
+                            .append(sourceDir.getAbsolutePath().replace("'", "'\\''"))
+                            .append("' '")
+                            .append(mountPoint.getAbsolutePath().replace("'", "'\\''"))
+                            .append("'\n");
+                    mountedPaths.add(mountPoint.getAbsolutePath());
+                }
+            }
+        }
+
+        // Set ownership for this session
+        File winePrefix = new File(container.getRootDir(), ".wine");
+        scriptContent.append("/system/bin/chown -R 0:0 '").append(winePrefix.getAbsolutePath().replace("'", "'\\''")).append("'\n");
+        scriptContent.append("/system/bin/chown -R 0:0 '").append(rootDir.getPath()).append("/usr/tmp' 2>/dev/null\n");
+        scriptContent.append("/system/bin/chown -R 0:0 '").append(rootDir.getPath()).append("/tmp' 2>/dev/null\n");
+
+        // Ensure system binaries are in PATH
+        String pathVar = envVars.get("PATH");
+        if (pathVar != null && !pathVar.contains("/system/bin")) {
+            envVars.put("PATH", pathVar + ":/system/bin");
+        }
+
+        for (String env : envVars.toStringArray()) {
+            int eqIndex = env.indexOf('=');
+            if (eqIndex > 0) {
+                String key = env.substring(0, eqIndex);
+                String value = env.substring(eqIndex + 1).replace("'", "'\\''");
+                scriptContent.append("export ").append(key).append("='").append(value).append("'\n");
+            }
+        }
+
+        scriptContent.append("exec ").append(baseCommand).append("\n");
+
+        try {
+            java.lang.Process process = Runtime.getRuntime().exec("su");
+            try (OutputStreamWriter writer = new OutputStreamWriter(process.getOutputStream())) {
+                writer.write(scriptContent.toString());
+                writer.flush();
+            }
+
+            new Thread(() -> {
+                try {
+                    BufferedReader stdout = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                    BufferedReader stderr = new BufferedReader(new InputStreamReader(process.getErrorStream()));
+                    String line;
+                    while ((line = stdout.readLine()) != null) Log.i("ROOT_EXEC_STDOUT", line);
+                    while ((line = stderr.readLine()) != null) Log.e("ROOT_EXEC_STDERR", line);
+
+                    int status = process.waitFor();
+                    synchronized (lock) {
+                        pid = -1;
+                    }
+                    if (!environment.isWinetricksRunning() && terminationCallback != null) {
+                        new Handler(Looper.getMainLooper()).post(() -> terminationCallback.call(status));
+                    }
+                } catch (Exception e) {
+                    Log.e("BionicProgramLauncherComponent", "Error waiting for root process", e);
+                } finally {
+                    cleanupRootMounts();
+                }
+            }).start();
+
+            return ProcessHelper.getPid(process);
+        } catch (IOException e) {
+            Log.e("BionicProgramLauncherComponent", "Failed to execute command as root", e);
+            cleanupRootMounts(); // Attempt cleanup even if start fails
+            return -1;
+        }
+    }
+
     private int execGuestProgram() {
 
         final int MAX_PLAYERS = 1; // old static method
@@ -250,7 +385,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         Log.d("BionicProgramLauncherComponent", "WinePath is " + winePath);
 
         envVars.put("PATH", winePath + ":" +
-                rootDir.getPath() + "/usr/bin");
+                rootDir.getPath() + "/usr/bin:/system/bin");
 
         envVars.put("LD_LIBRARY_PATH", rootDir.getPath() + "/usr/lib" + ":" + "/system/lib64");
         envVars.put("ANDROID_SYSVSHM_SERVER", rootDir.getPath() + UnixSocketConfig.SYSVSHM_SERVER_PATH);
@@ -336,16 +471,22 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             FileUtils.chmod(box64File, 0755);
         }
 
-        return ProcessHelper.exec(command, envVars.toStringArray(), workingDir != null ? workingDir : rootDir, (status) -> {
-            synchronized (lock) {
-                pid = -1;
-            }
-            if (!environment.isWinetricksRunning()) {
-                SteamService.setGameRunning(false);
-                if (terminationCallback != null)
-                    terminationCallback.call(status);
-            }
-        });
+        boolean runAsRoot = container.getExtra("runAsRoot", "0").equals("1");
+
+        if (runAsRoot) {
+            return execAsRoot(command, envVars, rootDir);
+        } else {
+            return ProcessHelper.exec(command, envVars.toStringArray(), workingDir != null ? workingDir : rootDir, (status) -> {
+                synchronized (lock) {
+                    pid = -1;
+                }
+                if (!environment.isWinetricksRunning()) {
+                    SteamService.setGameRunning(false);
+                    if (terminationCallback != null)
+                        terminationCallback.call(status);
+                }
+            });
+        }
     }
 
     @NonNull
@@ -409,7 +550,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             contentsManager.applyContent(wowboxprofile);
         else
             Log.d("Extraction", "Extracting box64Version: " + wowbox64Version);
-            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, environment.getContext(), "wowbox64/wowbox64-" + wowbox64Version + ".tzst", system32dir);
+        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, environment.getContext(), "wowbox64/wowbox64-" + wowbox64Version + ".tzst", system32dir);
         container.putExtra("box64Version", wowbox64Version);
         containerDataChanged = true;
 
@@ -418,7 +559,7 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             contentsManager.applyContent(fexprofile);
         else
             Log.d("Extraction", "Extracting fexcoreVersion: " + fexcoreVersion);
-            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, environment.getContext(), "fexcore/fexcore-" + fexcoreVersion + ".tzst", system32dir);
+        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, environment.getContext(), "fexcore/fexcore-" + fexcoreVersion + ".tzst", system32dir);
         container.putExtra("fexcoreVersion", fexcoreVersion);
         containerDataChanged = true;
         if (containerDataChanged) container.saveData();

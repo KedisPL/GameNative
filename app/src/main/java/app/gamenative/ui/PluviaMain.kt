@@ -399,7 +399,7 @@ fun PluviaMain(
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            if (!state.isSteamConnected && !isConnecting && !SteamService.isGameRunning) {
+            if (PrefManager.enableSteamLogin && !state.isSteamConnected && !isConnecting && !SteamService.isGameRunning) {
                 Timber.d("[PluviaMain]: Steam not connected - attempt")
                 isConnecting = true
                 context.startForegroundService(Intent(context, SteamService::class.java))
@@ -869,7 +869,13 @@ fun PluviaMain(
 
         NavHost(
             navController = navController,
-            startDestination = PluviaScreen.LoginUser.route,
+            startDestination = remember {
+                if (PrefManager.enableSteamLogin) {
+                    PluviaScreen.LoginUser.route
+                } else {
+                    PluviaScreen.Home.route + "?offline=true"
+                }
+            }
         ) {
             /** Login **/
             /** Login **/

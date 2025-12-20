@@ -1830,6 +1830,15 @@ fun ContainerConfigDialog(
                                 )
                             }
                             if (selectedTab == 8) SettingsGroup() {
+                                SettingsSwitch(
+                                    colors = settingsTileColorsAlt(),
+                                    title = { Text(text = "Run as Root") },
+                                    subtitle = { Text(text = "Experimental: Requires rooted device") },
+                                    state = config.runAsRoot,
+                                    onCheckedChange = {
+                                        config = config.copy(runAsRoot = it)
+                                    },
+                                )
                                 SettingsListDropdown(
                                     colors = settingsTileColors(),
                                     title = { Text(text = stringResource(R.string.startup_selection)) },

@@ -271,6 +271,7 @@ object ContainerUtils {
             sharpnessEffect = container.getExtra("sharpnessEffect", "None"),
             sharpnessLevel = container.getExtra("sharpnessLevel", "100").toIntOrNull() ?: 100,
             sharpnessDenoise = container.getExtra("sharpnessDenoise", "100").toIntOrNull() ?: 100,
+            runAsRoot = container.getExtra("runAsRoot", "0") == "1",
         )
     }
 
@@ -306,6 +307,7 @@ object ContainerUtils {
                 "fexcoreMultiBlock" -> value?.let { updatedData.copy(fexcoreMultiBlock = it as? String ?: updatedData.fexcoreMultiBlock) } ?: updatedData
                 "fexcorePreset" -> value?.let { updatedData.copy(fexcorePreset = it as? String ?: updatedData.fexcorePreset) } ?: updatedData
                 "useLegacyDRM" -> value?.let { updatedData.copy(useLegacyDRM = it as? Boolean ?: updatedData.useLegacyDRM) } ?: updatedData
+                "runAsRoot" -> value?.let { updatedData.copy(runAsRoot = it as? Boolean ?: updatedData.runAsRoot) } ?: updatedData
                 else -> updatedData
             }
         }
@@ -386,6 +388,7 @@ object ContainerUtils {
         container.putExtra("sharpnessEffect", containerData.sharpnessEffect)
         container.putExtra("sharpnessLevel", containerData.sharpnessLevel.toString())
         container.putExtra("sharpnessDenoise", containerData.sharpnessDenoise.toString())
+        container.putExtra("runAsRoot", if (containerData.runAsRoot) "1" else "0")
         try {
             container.language = containerData.language
         } catch (e: Exception) {

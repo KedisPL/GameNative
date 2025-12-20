@@ -142,12 +142,43 @@ object SteamUtils {
     }
 
     /**
+     * Attempts to recover ownership of a directory tree using su.
+     * This fixes EACCES/Permission Denied errors caused by crashes in previous root sessions.
+     */
+    private fun recoverPathOwnership(context: Context, directory: File) {
+        try {
+            if (!directory.exists()) return
+
+            val appUid = context.applicationInfo.uid
+            Timber.i("Attempting to recover ownership of ${directory.absolutePath} to uid $appUid")
+
+            // Use generic 'su' to chown the directory recursively
+            val cmd = arrayOf("su", "-c", "chown -R $appUid:$appUid \"${directory.absolutePath}\"")
+            val process = Runtime.getRuntime().exec(cmd)
+            val exitCode = process.waitFor()
+
+            if (exitCode == 0) {
+                Timber.i("Successfully recovered ownership.")
+            } else {
+                Timber.w("Ownership recovery script exited with code $exitCode. (If not rooted, this is expected)")
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to execute ownership recovery")
+        }
+    }
+
+    /**
      * Replaces any existing `steam_api.dll` or `steam_api64.dll` in the app directory
      * with our pipe dll stored in assets
      */
     suspend fun replaceSteamApi(context: Context, appId: String) {
         val steamAppId = ContainerUtils.extractGameIdFromContainerId(appId)
         val appDirPath = SteamService.getAppDirPath(steamAppId)
+
+        // FIX: Recover ownership before doing file operations that might fail
+        val container = ContainerUtils.getOrCreateContainer(context, appId)
+        recoverPathOwnership(context, container.getRootDir())
+
         if (MarkerUtils.hasMarker(appDirPath, Marker.STEAM_DLL_REPLACED)) {
             return
         }
@@ -209,6 +240,10 @@ object SteamUtils {
         val steamAppId = ContainerUtils.extractGameIdFromContainerId(appId)
         val appDirPath = SteamService.getAppDirPath(steamAppId)
         val container = ContainerUtils.getContainer(context, appId)
+
+        // FIX: Recover ownership of the container root to ensure we can write files
+        // even if a previous root session left them owned by root.
+        recoverPathOwnership(context, container.getRootDir())
 
         if (MarkerUtils.hasMarker(appDirPath, Marker.STEAM_COLDCLIENT_USED) && File(container.getRootDir(), ".wine/drive_c/Program Files (x86)/Steam/steamclient_loader_x64.dll").exists()) {
             return
@@ -393,8 +428,8 @@ object SteamUtils {
             if (unpackedExe.exists()) {
                 // Check if files are different (compare size and last modified time for efficiency)
                 val areFilesDifferent = !exe.exists() ||
-                    exe.length() != unpackedExe.length() ||
-                    exe.lastModified() != unpackedExe.lastModified()
+                        exe.length() != unpackedExe.length() ||
+                        exe.lastModified() != unpackedExe.lastModified()
 
                 if (areFilesDifferent) {
                     Files.copy(unpackedExe.toPath(), exe.toPath(), StandardCopyOption.REPLACE_EXISTING)
@@ -582,6 +617,10 @@ object SteamUtils {
         val steamAppId = ContainerUtils.extractGameIdFromContainerId(appId)
         val imageFs = ImageFs.find(context)
         val container = ContainerUtils.getOrCreateContainer(context, appId)
+
+        // FIX: Recover ownership before file operations
+        recoverPathOwnership(context, container.getRootDir())
+
         val cfgFile = File(imageFs.wineprefix, "drive_c/Program Files (x86)/Steam/steam.cfg")
         if (container.isAllowSteamUpdates){
             Timber.i("Allowing steam updates, deleting the steam.cfg file")
@@ -852,7 +891,7 @@ object SteamUtils {
                         .replace("{Steam3AccountID}", "{::Steam3AccountID::}")
                     uniqueDirs.add("{::$root::}/$path")
                 }
-                
+
                 uniqueDirs.forEachIndexed { index, dir ->
                     appendLine("dir${index + 1}=$dir")
                 }

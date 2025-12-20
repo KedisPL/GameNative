@@ -782,4 +782,9 @@ object PrefManager {
     var appLanguage: String
         get() = getPref(APP_LANGUAGE, "")
         set(value) = setPref(APP_LANGUAGE, value)
+
+    private val ENABLE_STEAM_LOGIN = booleanPreferencesKey("enable_steam_login")
+    var enableSteamLogin: Boolean
+        get() = getPref(ENABLE_STEAM_LOGIN, true)
+        set(value) = setPref(ENABLE_STEAM_LOGIN, value)
 }

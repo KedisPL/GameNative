@@ -71,6 +71,8 @@ fun SettingsGroupInterface(
 ) {
     val context = LocalContext.current
 
+    var enableSteamLogin by rememberSaveable { mutableStateOf(PrefManager.enableSteamLogin) }
+
     var openWebLinks by rememberSaveable { mutableStateOf(PrefManager.openWebLinksExternally) }
 
     var openAppThemeDialog by rememberSaveable { mutableStateOf(false) }
@@ -115,6 +117,17 @@ fun SettingsGroupInterface(
     ) }
 
     SettingsGroup(title = { Text(text = stringResource(R.string.settings_interface_title)) }) {
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = "Connect to Steam automatically") },
+            subtitle = { Text(text = "Disable to use Offline Mode by default") },
+            state = enableSteamLogin,
+            onCheckedChange = {
+                enableSteamLogin = it
+                PrefManager.enableSteamLogin = it
+            },
+        )
+
         SettingsSwitch(
             colors = settingsTileColorsAlt(),
             title = { Text(text = stringResource(R.string.settings_interface_external_links_title)) },

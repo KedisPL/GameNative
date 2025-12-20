@@ -38,6 +38,16 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 public abstract class FileUtils {
+    public static boolean isRootAvailable() {
+        for (String path : System.getenv("PATH").split(":")) {
+            File file = new File(path, "su");
+            if (file.exists()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static byte[] read(Context context, String assetFile) {
         try (InputStream inStream = context.getAssets().open(assetFile)) {
             return StreamUtils.copyToByteArray(inStream);
@@ -94,11 +104,11 @@ public abstract class FileUtils {
         if (parentDir != null && !parentDir.exists()) {
             parentDir.mkdirs();
         }
-        
+
         // Create temporary file in same directory
-        File tempFile = createTempFile(parentDir != null ? parentDir : file.getAbsoluteFile().getParentFile(), 
+        File tempFile = createTempFile(parentDir != null ? parentDir : file.getAbsoluteFile().getParentFile(),
                                         getBasename(file.getPath()));
-        
+
         boolean success = false;
         try (BufferedWriter bw = new BufferedWriter(new FileWriter(tempFile))) {
             bw.write(data);
@@ -111,13 +121,13 @@ public abstract class FileUtils {
             tempFile.delete();
             return false;
         }
-        
+
         // Atomically replace original file with temp file
         if (success) {
             try {
                 // Atomic move - replaces target if it exists
-                Files.move(tempFile.toPath(), file.toPath(), 
-                          StandardCopyOption.ATOMIC_MOVE, 
+                Files.move(tempFile.toPath(), file.toPath(),
+                          StandardCopyOption.ATOMIC_MOVE,
                           StandardCopyOption.REPLACE_EXISTING);
                 return true;
             }
@@ -127,7 +137,7 @@ public abstract class FileUtils {
                 return false;
             }
         }
-        
+
         return false;
     }
 
