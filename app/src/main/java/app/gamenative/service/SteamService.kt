@@ -1085,9 +1085,9 @@ class SteamService : Service(), IChallengeUrlChanged {
                             debug = false,
                             androidEmulation = true,
                             maxDownloads = maxDownloads,
-                            maxDecompress = maxDecompress,
-                            maxFileWrites = maxFileWrites,
-                            parentJob = coroutineContext[Job]
+                            //maxDecompress = maxDecompress,
+                          //  maxFileWrites = maxFileWrites,
+                           // parentJob = coroutineContext[Job]
                         )
 
                         // Create listener

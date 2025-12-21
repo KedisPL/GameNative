@@ -141,6 +141,8 @@ import java.util.Arrays
 import java.util.Locale
 import kotlin.io.path.name
 import kotlin.text.lowercase
+import android.widget.Toast
+import com.winlator.contentdialog.TaskManagerDialog
 import com.winlator.PrefManager as WinlatorPrefManager
 
 // TODO logs in composables are 'unstable' which can cause recomposition (performance issues)
@@ -391,6 +393,29 @@ fun XServerScreen(
                         NavigationDialog.ACTION_EDIT_PHYSICAL_CONTROLLER -> {
                             PostHog.capture(event = "edit_physical_controller_from_menu")
                             showPhysicalControllerDialog = true
+                        }
+
+                        NavigationDialog.ACTION_RELATIVE_MOUSE -> {
+                            val xServer = xServerView!!.getxServer()
+                            val newState = !xServer.isRelativeMouseMovement
+
+                            xServer.isRelativeMouseMovement = newState
+                            // Persist state to container if your Container class supports it
+                            //container.isRelativeMouseMovement = newState
+                            container.saveData()
+
+                            if (newState) {
+                                PluviaApp.touchpadView?.requestPointerCapture()
+                                Toast.makeText(context, R.string.relative_mouse_enabled, Toast.LENGTH_SHORT).show()
+                            } else {
+                                PluviaApp.touchpadView?.releasePointerCapture()
+                                Toast.makeText(context, R.string.relative_mouse_disabled, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+
+                        NavigationDialog.ACTION_TASK_MANAGER -> {
+                            val xServer = xServerView!!.getxServer()
+                            TaskManagerDialog(context, xServer).show()
                         }
 
                         NavigationDialog.ACTION_EXIT_GAME -> {

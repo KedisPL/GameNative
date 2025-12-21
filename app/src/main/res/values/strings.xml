@@ -141,6 +141,9 @@
     <string name="download_file">Download File</string>
     <string name="processor_affinity">Processor Affinity</string>
     <string name="bring_to_front">Bring to Front</string>
+    <string name="process_name">Process Name</string>
+    <string name="pid">PID</string>
+    <string name="memory">Memory</string>
     <string name="end_process">End Process</string>
     <string name="new_file">New File</string>
     <string name="add_to_home_screen">Add to Home Screen</string>
@@ -175,6 +178,13 @@
     <string name="touchpad_help">Touchpad Help</string>
     <string name="hide_controls_with_controller">Hide on-screen controls with controller</string>
     <string name="hide_controls_with_controller_description">Automatically hide on-screen controls when a physical controller is connected</string>
+    <string name="relative_mouse_movement">Relative Mouse Movement</string>
+    <string name="relative_mouse_disabled">Relative Mouse Disabled</string>
+    <string name="relative_mouse_enabled">Relative Mouse Enabled</string>
+    <string name="new_task">New Task</string>
+    <string name="processes">Processes</string>
+    <string name="do_you_want_to_end_this_process">Do you want to end this process?</string>
+    <string name="no_items_to_display_taskmgr">No running processes detected!?</string>
 
     <!-- Controller Binding Dialog -->
     <string name="select_binding">Select Binding</string>
