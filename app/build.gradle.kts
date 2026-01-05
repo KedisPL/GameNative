@@ -85,6 +85,7 @@ android {
             "zh-rCN",  // Simplified Chinese
             "fr",      // French
             "de",      // German
+            "uk",      // Ukrainian
             // TODO: Add more languages here using the ISO 639-1 locale code with regional qualifiers (e.g., "pt-rPT" for European Portuguese)
         )
 
