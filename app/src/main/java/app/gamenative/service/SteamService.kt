@@ -152,6 +152,19 @@ import java.util.concurrent.TimeUnit
 @AndroidEntryPoint
 class SteamService : Service(), IChallengeUrlChanged {
 
+    // To view log messages in android logcat properly
+    private val logger = object : LogListener {
+        override fun onLog(clazz: Class<*>, message: String?, throwable: Throwable?) {
+            val logMessage = message ?: "No message given"
+            Timber.i(throwable, "[${clazz.simpleName}] -> $logMessage")
+        }
+
+        override fun onError(clazz: Class<*>, message: String?, throwable: Throwable?) {
+            val logMessage = message ?: "No message given"
+            Timber.e(throwable, "[${clazz.simpleName}] -> $logMessage")
+        }
+    }
+
     @Inject
     lateinit var db: PluviaDatabase
 
@@ -2239,17 +2252,6 @@ class SteamService : Service(), IChallengeUrlChanged {
         connectivityManager.registerNetworkCallback(networkRequest, networkCallback)
 
         // To view log messages in android logcat properly
-        val logger = object : LogListener {
-            override fun onLog(clazz: Class<*>, message: String?, throwable: Throwable?) {
-                val logMessage = message ?: "No message given"
-                Timber.i(throwable, "[${clazz.simpleName}] -> $logMessage")
-            }
-
-            override fun onError(clazz: Class<*>, message: String?, throwable: Throwable?) {
-                val logMessage = message ?: "No message given"
-                Timber.e(throwable, "[${clazz.simpleName}] -> $logMessage")
-            }
-        }
         LogManager.addListener(logger)
     }
 
@@ -2438,6 +2440,8 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         PluviaApp.events.off<AndroidEvent.EndProcess, Unit>(onEndProcess)
         PluviaApp.events.clearAllListenersOf<SteamEvent<Any>>()
+
+        LogManager.removeListener(logger)
     }
 
     private fun reconnect() {
