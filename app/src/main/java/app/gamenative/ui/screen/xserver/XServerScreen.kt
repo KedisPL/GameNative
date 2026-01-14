@@ -67,6 +67,7 @@ import app.gamenative.ui.data.XServerState
 import app.gamenative.ui.theme.settingsTileColors
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.CustomGameScanner
+import app.gamenative.utils.SteamTokenLogin
 import app.gamenative.utils.SteamUtils
 import com.posthog.PostHog
 import com.winlator.alsaserver.ALSAClient
@@ -1010,31 +1011,31 @@ fun XServerScreen(
         val manager = PluviaApp.inputControlsManager ?: InputControlsManager(context)
         val profileIdStr = container.getExtra("profileId", "0")
         val profileId = profileIdStr.toIntOrNull() ?: 0
-        
+
         // Get profile, but don't load profile 0 directly (will duplicate if needed)
         var profile = if (profileId != 0) {
             manager.getProfile(profileId)
         } else {
             null  // Will create new profile below
         }
-        
+
         // Auto-create profile if using default (profile 0)
         if (profile == null) {
             val allProfiles = manager.getProfiles(false)
             val sourceProfile = manager.getProfile(0)
                 ?: allProfiles.firstOrNull { it.id == 2 }
                 ?: allProfiles.firstOrNull()
-            
+
             if (sourceProfile != null) {
                 try {
                     // Duplicate profile 0 to create game-specific profile
                     profile = manager.duplicateProfile(sourceProfile)
-                    
+
                     // Rename to game name
                     val gameName = currentAppInfo?.name ?: container.name
                     profile.setName("$gameName - Physical Controller")
                     profile.save()
-                    
+
                     // Associate with container
                     container.putExtra("profileId", profile.id.toString())
                     container.saveData()
@@ -1061,11 +1062,11 @@ fun XServerScreen(
                             // Ensure controllersLoaded is true before saving
                             // (addController sets the flag even if controller already exists)
                             profile.addController("*")
-                            
+
                             // Save profileId to container so it persists across launches
                             container.putExtra("profileId", profile.id.toString())
                             container.saveData()
-                            
+
                             // Save profile (will now write controllers since controllersLoaded = true)
                             profile.save()
                             profile.loadControllers()
@@ -1578,7 +1579,16 @@ private fun setupXEnvironment(
         guestProgramLauncherComponent.box86Preset = container.box86Preset
         guestProgramLauncherComponent.box64Preset = container.box64Preset
         guestProgramLauncherComponent.setPreUnpack {
-            unpackExecutableFile(context, container.isNeedsUnpacking, container, appId, appLaunchInfo, guestProgramLauncherComponent, containerVariantChanged, onGameLaunchError)
+            unpackExecutableFile(
+                context = context,
+                needsUnpacking = container.isNeedsUnpacking,
+                container = container,
+                appId = appId,
+                appLaunchInfo = appLaunchInfo,
+                guestProgramLauncherComponent = guestProgramLauncherComponent,
+                containerVariantChanged = containerVariantChanged,
+                onError = onGameLaunchError
+            )
         }
 
         val enableGstreamer = container.isGstreamerWorkaround()
@@ -1651,6 +1661,19 @@ private fun setupXEnvironment(
     }
     environment.addComponent(guestProgramLauncherComponent)
 
+    // Moved here, as guestProgramLauncherComponent.environment is setup after addComponent()
+    if (container != null) {
+        if (container.isLaunchRealSteam) {
+            SteamTokenLogin(
+                steamId = PrefManager.steamUserSteamId64.toString(),
+                login = PrefManager.username,
+                token = PrefManager.refreshToken,
+                imageFs = imageFs,
+                guestProgramLauncherComponent = guestProgramLauncherComponent,
+            ).setupSteamFiles()
+        }
+    }
+
     // Log container settings before starting
     if (container != null) {
         Timber.i("---- Launching Container ----")
@@ -1676,7 +1699,7 @@ private fun setupXEnvironment(
     // Request encrypted app ticket for Steam games at launch time
     val isCustomGame = ContainerUtils.extractGameSourceFromContainerId(appId) == GameSource.CUSTOM_GAME
     val gameIdForTicket = ContainerUtils.extractGameIdFromContainerId(appId)
-    if (!bootToContainer && !isCustomGame && gameIdForTicket != null) {
+    if (!bootToContainer && !isCustomGame && gameIdForTicket != null && !container.isLaunchRealSteam) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val ticket = SteamService.instance?.getEncryptedAppTicket(gameIdForTicket)
@@ -1812,7 +1835,7 @@ private fun getWineStartCommand(
         Timber.tag("XServerScreen").w("appLaunchInfo is null for Steam game: $appId")
         "\"wfm.exe\""
     } else {
-        if (container.isLaunchRealSteam()) {
+        if (container.isLaunchRealSteam) {
             // Launch Steam with the applaunch parameter to start the game
             "\"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe\" -silent -vgui -tcp " +
                     "-nobigpicture -nofriendsui -nochatui -nointro -applaunch $gameId"
@@ -2297,7 +2320,8 @@ private fun unpackExecutableFile(
                         Files.copy(unpackedExe.toPath(), exe.toPath(), REPLACE_EXISTING)
                         Timber.i("Successfully moved files for $windowsPath")
                     } else {
-                        val errorMsg = "Either original exe or unpacked exe does not exist for $windowsPath. Original: ${exe.exists()}, Unpacked: ${unpackedExe.exists()}"
+                        val errorMsg =
+                            "Either original exe or unpacked exe does not exist for $windowsPath. Original: ${exe.exists()}, Unpacked: ${unpackedExe.exists()}"
                         Timber.w(errorMsg)
                     }
                 } catch (e: Exception) {
