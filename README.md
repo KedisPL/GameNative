@@ -45,5 +45,3 @@ Join our [Discord server](https://discord.gg/2hKv4VfZfE) for support and updates
 
 **Disclaimer: This software is intended for playing games that you legally own. Do not use this software for piracy or any other illegal purposes. The maintainer of this fork assumes no
 responsibility for misuse.**
-
-This project is tested with BrowserStack.
