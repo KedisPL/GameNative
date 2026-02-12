@@ -44,7 +44,7 @@ object ContainerUtils {
             DefaultVersion.VARIANT = Container.BIONIC
             DefaultVersion.WINE_VERSION = "proton-9.0-arm64ec"
             DefaultVersion.DEFAULT_GRAPHICS_DRIVER = "Wrapper"
-            DefaultVersion.DXVK = "2.4.1-gplasync"
+            DefaultVersion.DXVK = if (GPUInformation.isAdreno6xx(context)) "1.11.1-sarek" else "2.4.1-gplasync"
             DefaultVersion.VKD3D = "2.14.1"
             DefaultVersion.WRAPPER = "turnip26.0.0_R8"
             DefaultVersion.STEAM_TYPE = Container.STEAM_TYPE_NORMAL
