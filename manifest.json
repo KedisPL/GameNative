@@ -658,7 +658,7 @@
         "variant": "bionic"
       }
     ],
-    "wowBox64": [
+    "wowbox64": [
       {
         "id": "0.3.6-0",
         "name": "WOWBox64 0.3.6",
