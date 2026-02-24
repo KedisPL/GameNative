@@ -79,6 +79,7 @@ import app.gamenative.ui.data.XServerState
 import app.gamenative.ui.theme.settingsTileColors
 import app.gamenative.utils.ContainerUtils
 import app.gamenative.utils.CustomGameScanner
+import app.gamenative.utils.PreLaunchSteps
 import app.gamenative.utils.SteamTokenLogin
 import app.gamenative.utils.SteamUtils
 import com.posthog.PostHog
@@ -1738,6 +1739,7 @@ private fun setupXEnvironment(
     onGameLaunchError: ((String) -> Unit)? = null,
     navigateBack: () -> Unit,
 ): XEnvironment {
+    val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
     val lc_all = container!!.lC_ALL
     val imageFs = ImageFs.find(context)
     Timber.i("ImageFs paths:")
@@ -1843,7 +1845,7 @@ private fun setupXEnvironment(
         guestProgramLauncherComponent.setContainer(container);
         guestProgramLauncherComponent.setWineInfo(xServerState.value.wineInfo);
         val guestExecutable = "wine explorer /desktop=shell," + xServer.screenInfo + " " +
-            getWineStartCommand(context, appId, container, bootToContainer, testGraphics, appLaunchInfo, envVars, guestProgramLauncherComponent) +
+            getWineStartCommand(context, appId, container, bootToContainer, testGraphics, appLaunchInfo, envVars, guestProgramLauncherComponent, gameSource) +
             (if (container.execArgs.isNotEmpty()) " " + container.execArgs else "")
         guestProgramLauncherComponent.isWoW64Mode = wow64Mode
         guestProgramLauncherComponent.guestExecutable = guestExecutable
@@ -1879,6 +1881,7 @@ private fun setupXEnvironment(
             } catch (e: Exception) {
                 Timber.tag("GameFixes").w(e, "Game fixes failed in preUnpack")
             }
+            PreLaunchSteps().run(context, appId, container, guestProgramLauncherComponent, gameSource)
             unpackExecutableFile(
                 context = context,
                 needsUnpacking = container.isNeedsUnpacking,
@@ -2003,7 +2006,7 @@ private fun setupXEnvironment(
     }
 
     // Request encrypted app ticket for Steam games at launch time
-    val isCustomGame = ContainerUtils.extractGameSourceFromContainerId(appId) == GameSource.CUSTOM_GAME
+    val isCustomGame = gameSource == GameSource.CUSTOM_GAME
     val gameIdForTicket = ContainerUtils.extractGameIdFromContainerId(appId)
     if (!bootToContainer && !isCustomGame && gameIdForTicket != null && !container.isLaunchRealSteam) {
         CoroutineScope(Dispatchers.IO).launch {
@@ -2041,14 +2044,13 @@ private fun getWineStartCommand(
     appLaunchInfo: LaunchInfo?,
     envVars: EnvVars,
     guestProgramLauncherComponent: GuestProgramLauncherComponent,
+    gameSource: GameSource,
 ): String {
     val tempDir = File(container.getRootDir(), ".wine/drive_c/windows/temp")
     FileUtils.clear(tempDir)
 
     Timber.tag("XServerScreen").d("appLaunchInfo is $appLaunchInfo")
 
-    // Check game source
-    val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
     val isCustomGame = gameSource == GameSource.CUSTOM_GAME
     val isGOGGame = gameSource == GameSource.GOG
     val isEpicGame = gameSource == GameSource.EPIC
@@ -2094,7 +2096,8 @@ private fun getWineStartCommand(
             bootToContainer = bootToContainer,
             appLaunchInfo = appLaunchInfo,
             envVars = envVars,
-            guestProgramLauncherComponent = guestProgramLauncherComponent
+            guestProgramLauncherComponent = guestProgramLauncherComponent,
+            gameId = gameId,
         )
 
         Timber.tag("XServerScreen").i("GOG launch command: $gogCommand")
@@ -2103,7 +2106,7 @@ private fun getWineStartCommand(
         // For Epic games, get the launch command
         Timber.tag("XServerScreen").i("Launching Epic game: $gameId")
         val game = runBlocking {
-            EpicService.getInstance()?.epicManager?.getGameById(gameId.toInt())
+            EpicService.getInstance()?.epicManager?.getGameById(gameId)
         }
 
         if (game == null || !game.isInstalled || game.installPath.isEmpty()) {
