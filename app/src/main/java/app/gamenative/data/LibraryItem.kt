@@ -6,6 +6,9 @@ import app.gamenative.utils.CustomGameScanner
 enum class GameSource {
     STEAM,
     CUSTOM_GAME,
+    GOG,
+    EPIC,
+    AMAZON
     // Add other platforms here..
 }
 
@@ -16,14 +19,15 @@ enum class GameCompatibilityStatus {
     GPU_COMPATIBLE
 }
 
-/**
- * Data class for the Library list
- */
+/** Library list item. */
 data class LibraryItem(
     val index: Int = 0,
     val appId: String = "",
     val name: String = "",
     val iconHash: String = "",
+    val capsuleImageUrl: String = "",
+    val headerImageUrl: String = "",
+    val heroImageUrl: String = "",
     val isShared: Boolean = false,
     val gameSource: GameSource = GameSource.STEAM,
     val compatibilityStatus: GameCompatibilityStatus? = null,
@@ -44,12 +48,25 @@ data class LibraryItem(
                     ""
                 }
             }
+            GameSource.GOG -> {
+                // GoG Images are typically the full URL, but have fallback just in case.
+                if (iconHash.isEmpty()) {
+                    ""
+                } else if (iconHash.startsWith("http")) {
+                    iconHash
+                } else {
+                    "${GOGGame.GOG_IMAGE_BASE_URL}/$iconHash"
+                }
+            }
+            GameSource.EPIC -> {
+                iconHash
+            }
+            GameSource.AMAZON -> {
+                iconHash
+            }
         }
 
-    /**
-     * Helper property to get the game ID as an integer
-     * Extracts the numeric part by removing the gameSource prefix
-     */
+    /** Numeric game ID extracted from the source-prefixed appId; returns 0 if parsing fails. */
     val gameId: Int
-        get() = appId.removePrefix("${gameSource.name}_").toInt()
+        get() = appId.removePrefix("${gameSource.name}_").toIntOrNull() ?: 0
 }

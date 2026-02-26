@@ -99,6 +99,9 @@ import com.winlator.xenvironment.ImageFsInstaller
 import com.winlator.fexcore.FEXCoreManager
 import app.gamenative.ui.screen.library.appscreen.SteamAppScreen
 import app.gamenative.ui.screen.library.appscreen.CustomGameAppScreen
+import app.gamenative.ui.screen.library.appscreen.GOGAppScreen
+import app.gamenative.ui.screen.library.appscreen.EpicAppScreen
+import app.gamenative.ui.screen.library.appscreen.AmazonAppScreen
 import app.gamenative.ui.data.GameDisplayInfo
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -179,6 +182,7 @@ private fun SkeletonText(
 fun AppScreen(
     libraryItem: LibraryItem,
     onClickPlay: (Boolean) -> Unit,
+    onTestGraphics: () -> Unit,
     onBack: () -> Unit,
 ) {
     // Get the appropriate screen model based on game source
@@ -186,6 +190,9 @@ fun AppScreen(
         when (libraryItem.gameSource) {
             app.gamenative.data.GameSource.STEAM -> SteamAppScreen()
             app.gamenative.data.GameSource.CUSTOM_GAME -> CustomGameAppScreen()
+            app.gamenative.data.GameSource.GOG -> GOGAppScreen()
+            app.gamenative.data.GameSource.EPIC -> EpicAppScreen()
+            app.gamenative.data.GameSource.AMAZON -> AmazonAppScreen()
         }
     }
 
@@ -193,6 +200,7 @@ fun AppScreen(
     screenModel.Content(
         libraryItem = libraryItem,
         onClickPlay = onClickPlay,
+        onTestGraphics = onTestGraphics,
         onBack = onBack,
     )
 }
@@ -223,6 +231,7 @@ internal fun AppScreenContent(
     downloadProgress: Float,
     hasPartialDownload: Boolean,
     isUpdatePending: Boolean,
+    downloadInfo: app.gamenative.data.DownloadInfo? = null,
     onDownloadInstallClick: () -> Unit,
     onPauseResumeClick: () -> Unit,
     onDeleteDownloadClick: () -> Unit,
@@ -495,8 +504,13 @@ internal fun AppScreenContent(
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
                             contentPadding = PaddingValues(16.dp)
                         ) {
+                            val buttonText = if (ContainerUtils.extractGameSourceFromContainerId(displayInfo.appId) == app.gamenative.data.GameSource.CUSTOM_GAME) {
+                                stringResource(R.string.remove)
+                            } else {
+                                stringResource(R.string.uninstall)
+                            }
                             Text(
-                                text = stringResource(R.string.uninstall),
+                                text = buttonText,
                                 style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
                             )
                         }
@@ -508,7 +522,7 @@ internal fun AppScreenContent(
 
             // Download progress section
             if (isDownloading) {
-                val downloadInfo = SteamService.getAppDownloadInfo(displayInfo.gameId)
+                // downloadInfo passed from BaseAppScreen based on game source
                 val statusMessageFlow = downloadInfo?.getStatusMessageFlow()
                 val statusMessageState = statusMessageFlow?.collectAsState(initial = statusMessageFlow.value)
                 val statusMessage = statusMessageState?.value
@@ -918,6 +932,7 @@ private fun Preview_AppScreen() {
                 downloadProgress = .50f,
                 hasPartialDownload = false,
                 isUpdatePending = false,
+                downloadInfo = null,
                 onDownloadInstallClick = { isDownloading = !isDownloading },
                 onPauseResumeClick = { },
                 onDeleteDownloadClick = { },
@@ -932,4 +947,3 @@ private fun Preview_AppScreen() {
         }
     }
 }
-

@@ -30,9 +30,12 @@ import androidx.compose.ui.platform.LocalContext
 import coil.ImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import coil.intercept.Interceptor
 import coil.request.CachePolicy
 import app.gamenative.events.AndroidEvent
 import app.gamenative.service.SteamService
+import app.gamenative.service.gog.GOGService
+import app.gamenative.service.epic.EpicService
 import app.gamenative.ui.PluviaMain
 import app.gamenative.ui.enums.Orientation
 import app.gamenative.utils.AnimatedPngDecoder
@@ -46,7 +49,13 @@ import com.winlator.core.AppUtils
 import com.winlator.inputcontrols.ControllerManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
+import java.util.Collections
 import java.util.EnumSet
+import java.util.concurrent.atomic.AtomicBoolean
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import kotlin.math.abs
 import okio.Path.Companion.toOkioPath
 import timber.log.Timber
@@ -54,7 +63,36 @@ import timber.log.Timber
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    // ignore VPN and mesh transports — they don't reliably indicate internet
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        private val validated = Collections.synchronizedSet(mutableSetOf<Network>())
+
+        private fun skip(caps: NetworkCapabilities) =
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) ||
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI_AWARE) ||
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_LOWPAN)
+
+        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+            if (skip(caps)) return
+            if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                validated.add(network)
+            } else {
+                validated.remove(network)
+            }
+            _hasInternet.set(validated.isNotEmpty())
+        }
+
+        override fun onLost(network: Network) {
+            validated.remove(network)
+            _hasInternet.set(validated.isNotEmpty())
+        }
+    }
+
     companion object {
+        // updated by NetworkCallback, read by Coil interceptor
+        private val _hasInternet = AtomicBoolean(false)
+        val hasInternet: Boolean get() = _hasInternet.get()
+
         private var totalIndex = 0
 
         private var currentOrientationChangeValue: Int = 0
@@ -85,6 +123,9 @@ class MainActivity : ComponentActivity() {
         fun hasPendingLaunchRequest(): Boolean {
             return pendingLaunchRequest != null
         }
+        
+        @Volatile
+        var wasLaunchedViaExternalIntent: Boolean = false
     }
 
     private val onSetSystemUi: (AndroidEvent.SetSystemUIVisibility) -> Unit = {
@@ -136,6 +177,15 @@ class MainActivity : ComponentActivity() {
 
         handleLaunchIntent(intent)
 
+        // track real network state (callback filters out VPN/mesh transports)
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        cm.registerNetworkCallback(
+            NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build(),
+            networkCallback,
+        )
+
         // Prevent device from sleeping while app is open
         AppUtils.keepScreenOn(this)
 
@@ -179,10 +229,20 @@ class MainActivity : ComponentActivity() {
                     .diskCachePolicy(CachePolicy.ENABLED)
                     .diskCache(diskCache)
                     .components {
+                        // serve cached images when device has no internet
+                        add(Interceptor { chain ->
+                            val request = if (!hasInternet) {
+                                chain.request.newBuilder()
+                                    .networkCachePolicy(CachePolicy.DISABLED)
+                                    .build()
+                            } else {
+                                chain.request
+                            }
+                            chain.proceed(request)
+                        })
                         add(IconDecoder.Factory())
                         add(AnimatedPngDecoder.Factory())
                     }
-                    // .logger(logger)
                     .build()
             }
 
@@ -202,6 +262,7 @@ class MainActivity : ComponentActivity() {
             val launchRequest = IntentLaunchManager.parseLaunchIntent(intent)
             if (launchRequest != null) {
                 Timber.d("[IntentLaunch]: Received external launch intent for app ${launchRequest.appId}")
+                wasLaunchedViaExternalIntent = true
 
                 // If already logged in, emit event immediately
                 // Otherwise store for processing after login
@@ -221,6 +282,7 @@ class MainActivity : ComponentActivity() {
                     Timber.d("[IntentLaunch]: User not logged in, stored pending launch request for app ${launchRequest.appId}")
                 }
             } else {
+                wasLaunchedViaExternalIntent = false
                 Timber.d("[IntentLaunch]: parseLaunchIntent returned null")
             }
         } catch (e: Exception) {
@@ -230,6 +292,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        cm.unregisterNetworkCallback(networkCallback)
 
         PluviaApp.events.emit(AndroidEvent.ActivityDestroyed)
 
@@ -246,9 +311,20 @@ class MainActivity : ComponentActivity() {
             isChangingConfigurations,
         )
 
-        if (SteamService.isConnected && !SteamService.isLoggedIn && !isChangingConfigurations && !SteamService.isGameRunning) {
+        if (SteamService.isConnected && !SteamService.isLoggedIn && !isChangingConfigurations && !SteamService.keepAlive) {
             Timber.i("Stopping Steam Service")
             SteamService.stop()
+        }
+
+        if (GOGService.isRunning && !isChangingConfigurations) {
+            Timber.i("Stopping GOG Service")
+            GOGService.stop()
+        }
+
+        // Stop EpicService when app is destroyed (unless config change)
+        if (EpicService.isRunning && !isChangingConfigurations) {
+            Timber.i("Stopping EpicService - app destroyed")
+            EpicService.stop()
         }
     }
 
@@ -257,16 +333,30 @@ class MainActivity : ComponentActivity() {
         // disable auto-stop when returning to foreground
         SteamService.autoStopWhenIdle = false
 
-        // Resume game if it was running
-        if (SteamService.isGameRunning) {
+        // Resume game if it was running and not currently suspended by the navigation overlay
+        if (SteamService.keepAlive && !PluviaApp.isOverlayPaused) {
             PluviaApp.xEnvironment?.onResume()
             Timber.d("Game resumed")
         }
+
+        // Restart GOG service if it went down
+        if (GOGService.hasStoredCredentials(this) && !GOGService.isRunning) {
+            Timber.i("GOG service was down on resume - restarting")
+            GOGService.start(this)
+        }
+
+        // Restart EpicService if it went down and user is authenticated
+        if (EpicService.hasStoredCredentials(this) &&
+            !EpicService.isRunning) {
+            Timber.i("EpicService was down on resume - restarting")
+            EpicService.start(this)
+        }
+
         PostHog.capture(event = "app_foregrounded")
     }
 
     override fun onPause() {
-        if (SteamService.isGameRunning) {
+        if (SteamService.keepAlive) {
             PluviaApp.xEnvironment?.onPause()
             Timber.d("Game paused due to app backgrounded")
         }
@@ -282,16 +372,43 @@ class MainActivity : ComponentActivity() {
         // enable auto-stop behavior if backgrounded
         SteamService.autoStopWhenIdle = true
 
+        Timber.d(
+            "onStop - Index: %d, Connected: %b, Logged-In: %b, Changing-Config: %b, Keep Alive: %b, Is Importing: %b",
+            index,
+            SteamService.isConnected,
+            SteamService.isLoggedIn,
+            isChangingConfigurations,
+            SteamService.keepAlive,
+            SteamService.isImporting,
+        )
         // stop SteamService only if no downloads or sync are in progress
         if (!isChangingConfigurations &&
             SteamService.isConnected &&
             !SteamService.hasActiveOperations() &&
             !SteamService.isLoginInProgress &&
-            !SteamService.isGameRunning &&
+            !SteamService.keepAlive &&
             !SteamService.isImporting
         ) {
             Timber.i("Stopping SteamService - no active operations")
             SteamService.stop()
+        }
+
+        // Stop GOGService if running and no downloads in progress
+        if (GOGService.isRunning && !isChangingConfigurations) {
+            if(!GOGService.hasActiveOperations()) {
+                Timber.i("Stopping GOG Service - no active operations")
+                GOGService.stop()
+            }
+        }
+
+        // Stop EpicService if running, unless there are active downloads or sync operations
+        if (EpicService.isRunning && !isChangingConfigurations) {
+            if (!EpicService.hasActiveOperations()) {
+                Timber.i("Stopping EpicService - no active operations")
+                EpicService.stop()
+            } else {
+                Timber.d("EpicService kept running - has active operations")
+            }
         }
     }
 
@@ -317,7 +434,7 @@ class MainActivity : ComponentActivity() {
         //  Since LibraryScreen uses its own navigation system, this will need to be re-worked accordingly.
         if (!eventDispatched) {
             if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
-                if (SteamService.isGameRunning){
+                if (SteamService.keepAlive){
                     PluviaApp.events.emit(AndroidEvent.BackPressed)
                     eventDispatched = true
                 }

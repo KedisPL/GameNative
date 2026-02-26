@@ -64,6 +64,9 @@ class PluviaApp : SplitCompatApplication() {
         // Init our datastore preferences.
         PrefManager.init(this)
 
+        // Initialize GOGConstants
+        app.gamenative.service.gog.GOGConstants.init(this)
+
         DownloadService.populateDownloadService(this)
 
         appScope.launch {
@@ -113,6 +116,9 @@ class PluviaApp : SplitCompatApplication() {
         var inputControlsView: InputControlsView? = null
         var inputControlsManager: InputControlsManager? = null
         var touchpadView: TouchpadView? = null
+
+        @JvmField
+        var isOverlayPaused: Boolean = false
 
         // Supabase client for game feedback
         lateinit var supabase: SupabaseClient

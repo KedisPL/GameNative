@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import app.gamenative.PluviaApp
 import app.gamenative.PrefManager
 import app.gamenative.data.GameProcessInfo
+import app.gamenative.data.GameSource
 import app.gamenative.data.LibraryItem
 import app.gamenative.di.IAppTheme
 import app.gamenative.enums.AppTheme
@@ -15,19 +16,23 @@ import app.gamenative.enums.PathType
 import app.gamenative.events.AndroidEvent
 import app.gamenative.events.SteamEvent
 import app.gamenative.service.SteamService
+import app.gamenative.service.epic.EpicCloudSavesManager
 import app.gamenative.ui.data.MainState
-import app.gamenative.utils.IntentLaunchManager
 import app.gamenative.ui.screen.PluviaScreen
+import app.gamenative.utils.ContainerUtils
+import app.gamenative.utils.IntentLaunchManager
 import app.gamenative.utils.SteamUtils
 import app.gamenative.utils.UpdateInfo
 import com.materialkolor.PaletteStyle
 import com.winlator.xserver.Window
 import dagger.hilt.android.lifecycle.HiltViewModel
 import `in`.dragonbra.javasteam.steam.handlers.steamapps.AppProcessInfo
-import kotlinx.coroutines.Dispatchers
 import java.nio.file.Paths
 import javax.inject.Inject
 import kotlin.io.path.name
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,9 +42,6 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import timber.log.Timber
-import kotlinx.coroutines.Job
-import app.gamenative.utils.ContainerUtils
-import kotlinx.coroutines.async
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
@@ -66,7 +68,9 @@ class MainViewModel @Inject constructor(
     private val _offline = MutableStateFlow(false)
     val isOffline: StateFlow<Boolean> get() = _offline
 
-    fun setOffline(value: Boolean) { _offline.value = value }
+    fun setOffline(value: Boolean) {
+        _offline.value = value
+    }
 
     private val _updateInfo = MutableStateFlow<UpdateInfo?>(null)
     val updateInfo: StateFlow<UpdateInfo?> = _updateInfo.asStateFlow()
@@ -76,17 +80,17 @@ class MainViewModel @Inject constructor(
     }
 
     private val onSteamConnected: (SteamEvent.Connected) -> Unit = {
-        Timber.i("Received is connected")
+        Timber.tag("MainViewModel").i("Received is connected")
         _state.update { it.copy(isSteamConnected = true) }
     }
 
     private val onSteamDisconnected: (SteamEvent.Disconnected) -> Unit = {
-        Timber.i("Received disconnected from Steam")
+        Timber.tag("MainViewModel").i("Received disconnected from Steam")
         _state.update { it.copy(isSteamConnected = false) }
     }
 
     private val onLoggingIn: (SteamEvent.LogonStarted) -> Unit = {
-        Timber.i("Received logon started")
+        Timber.tag("MainViewModel").i("Received logon started")
     }
 
     private val onBackPressed: (AndroidEvent.BackPressed) -> Unit = {
@@ -96,23 +100,23 @@ class MainViewModel @Inject constructor(
     }
 
     private val onLogonEnded: (SteamEvent.LogonEnded) -> Unit = {
-        Timber.i("Received logon ended")
+        Timber.tag("MainViewModel").i("Received logon ended")
         viewModelScope.launch {
             _uiEvent.send(MainUiEvent.OnLogonEnded(it.loginResult))
         }
     }
 
     private val onLoggedOut: (SteamEvent.LoggedOut) -> Unit = {
-        Timber.i("Received logged out")
+        Timber.tag("MainViewModel").i("Received logged out")
         viewModelScope.launch {
             _uiEvent.send(MainUiEvent.OnLoggedOut)
         }
     }
 
     private val onExternalGameLaunch: (AndroidEvent.ExternalGameLaunch) -> Unit = {
-        Timber.i("[MainViewModel]: Received external game launch event for app ${it.appId}")
+        Timber.tag("MainViewModel").i("Received external game launch event for app ${it.appId}")
         viewModelScope.launch {
-            Timber.i("[MainViewModel]: Sending ExternalGameLaunch UI event for app ${it.appId}")
+            Timber.tag("MainViewModel").i("Sending ExternalGameLaunch UI event for app ${it.appId}")
             _uiEvent.send(MainUiEvent.ExternalGameLaunch(it.appId))
         }
     }
@@ -152,6 +156,7 @@ class MainViewModel @Inject constructor(
         PluviaApp.events.off<AndroidEvent.SetBootingSplashText, Unit>(onSetBootingSplashText)
         PluviaApp.events.off<SteamEvent.Connected, Unit>(onSteamConnected)
         PluviaApp.events.off<SteamEvent.Disconnected, Unit>(onSteamDisconnected)
+        PluviaApp.events.off<SteamEvent.LogonStarted, Unit>(onLoggingIn)
         PluviaApp.events.off<SteamEvent.LogonEnded, Unit>(onLogonEnded)
         PluviaApp.events.off<SteamEvent.LoggedOut, Unit>(onLoggedOut)
     }
@@ -238,6 +243,10 @@ class MainViewModel @Inject constructor(
         _state.update { it.copy(bootToContainer = value) }
     }
 
+    fun setTestGraphics(value: Boolean) {
+        _state.update { it.copy(testGraphics = value) }
+    }
+
     fun launchApp(context: Context, appId: String) {
         // Show booting splash before launching the app
         viewModelScope.launch {
@@ -246,13 +255,17 @@ class MainViewModel @Inject constructor(
 
             val apiJob = viewModelScope.async(Dispatchers.IO) {
                 val container = ContainerUtils.getOrCreateContainer(context, appId)
-                if (container.isLaunchRealSteam()) {
-                    SteamUtils.restoreSteamApi(context, appId)
-                } else {
-                    if (container.isUseLegacyDRM) {
-                        SteamUtils.replaceSteamApi(context, appId)
+                val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
+                if (gameSource == GameSource.STEAM) {
+                    if (container.isLaunchRealSteam()) {
+                        SteamUtils.restoreSteamApi(context, appId)
                     } else {
-                        SteamUtils.replaceSteamclientDll(context, appId)
+                        val offline = _offline.value
+                        if (container.isUseLegacyDRM) {
+                            SteamUtils.replaceSteamApi(context, appId, offline)
+                        } else {
+                            SteamUtils.replaceSteamclientDll(context, appId, offline)
+                        }
                     }
                 }
             }
@@ -268,6 +281,7 @@ class MainViewModel @Inject constructor(
 
     fun exitSteamApp(context: Context, appId: String) {
         viewModelScope.launch {
+            Timber.tag("Exit").i("Exiting, getting feedback for appId: $appId")
             bootingSplashTimeoutJob?.cancel()
             bootingSplashTimeoutJob = null
             setShowBootingSplash(false)
@@ -275,11 +289,59 @@ class MainViewModel @Inject constructor(
             val hadTemporaryOverride = IntentLaunchManager.hasTemporaryOverride(appId)
 
             val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
-
+            Timber.tag("Exit").i("Got game id: $gameId")
             SteamService.notifyRunningProcesses()
-            SteamService.closeApp(gameId, isOffline.value) { prefix ->
-                PathType.from(prefix).toAbsPath(context, gameId, SteamService.userSteamId!!.accountID)
-            }.await()
+
+            // Check if this is a GOG or Epic game and sync cloud saves
+            val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
+            if (gameSource == GameSource.GOG) {
+                Timber.tag("GOG").i("[Cloud Saves] GOG Game detected for $appId — syncing cloud saves after close")
+                // Sync cloud saves (upload local changes to cloud)
+                // Run in background, don't block UI
+                viewModelScope.launch(Dispatchers.IO) {
+                    try {
+                        Timber.tag("GOG").d("[Cloud Saves] Starting post-game upload sync for $appId")
+                        val syncSuccess = app.gamenative.service.gog.GOGService.syncCloudSaves(
+                            context = context,
+                            appId = appId,
+                            preferredAction = "upload",
+                        )
+                        if (syncSuccess) {
+                            Timber.tag("GOG").i("[Cloud Saves] Upload sync completed successfully for $appId")
+                        } else {
+                            Timber.tag("GOG").w("[Cloud Saves] Upload sync failed for $appId")
+                        }
+                    } catch (e: Exception) {
+                        Timber.tag("GOG").e(e, "[Cloud Saves] Exception during upload sync for $appId")
+                    }
+                }
+            } else if (gameSource == GameSource.EPIC) {
+                Timber.tag("Epic").i("[Cloud Saves] Epic Game detected for $appId — syncing cloud saves after close")
+                // Sync cloud saves (upload local changes to cloud)
+                // Run in background, don't block UI
+                viewModelScope.launch(Dispatchers.IO) {
+                    try {
+                        Timber.tag("Epic").d("[Cloud Saves] Starting post-game upload sync for $gameId")
+                        val syncSuccess = app.gamenative.service.epic.EpicCloudSavesManager.syncCloudSaves(
+                            context = context,
+                            appId = gameId,
+                            preferredAction = "upload",
+                        )
+                        if (syncSuccess) {
+                            Timber.tag("Epic").i("[Cloud Saves] Upload sync completed successfully for $gameId")
+                        } else {
+                            Timber.tag("Epic").w("[Cloud Saves] Upload sync failed for $gameId")
+                        }
+                    } catch (e: Exception) {
+                        Timber.tag("Epic").e(e, "[Cloud Saves] Exception during upload sync for $gameId")
+                    }
+                }
+            } else {
+                // For Steam games, sync cloud saves
+                SteamService.closeApp(gameId, isOffline.value) { prefix ->
+                    PathType.from(prefix).toAbsPath(context, gameId, SteamService.userSteamId!!.accountID)
+                }.await()
+            }
 
             // Prompt user to save temporary container configuration if one was applied
             if (hadTemporaryOverride) {
@@ -289,23 +351,25 @@ class MainViewModel @Inject constructor(
 
             // After app closes, check if we need to show the feedback dialog
             try {
-                val container = ContainerUtils.getContainer(context, appId)
-                val shown = container.getExtra("discord_support_prompt_shown", "false") == "true"
-                val configChanged = container.getExtra("config_changed", "false") == "true"
-                if (!shown) {
-                    container.putExtra("discord_support_prompt_shown", "true")
-                    container.saveData()
-                    _uiEvent.send(MainUiEvent.ShowGameFeedbackDialog(appId))
-                }
+                // Do not show the Feedback form for non-steam games until we can support.
+                    val container = ContainerUtils.getContainer(context, appId)
 
-                // Only show feedback if container config was changed before this game run
-                if (configChanged) {
-                    // Clear the flag
-                    container.putExtra("config_changed", "false")
-                    container.saveData()
-                    // Show the feedback dialog
-                    _uiEvent.send(MainUiEvent.ShowGameFeedbackDialog(appId))
-                }
+                    val shown = container.getExtra("discord_support_prompt_shown", "false") == "true"
+                    val configChanged = container.getExtra("config_changed", "false") == "true"
+                    if (!shown) {
+                        container.putExtra("discord_support_prompt_shown", "true")
+                        container.saveData()
+                        _uiEvent.send(MainUiEvent.ShowGameFeedbackDialog(appId))
+                    }
+
+                    // Only show feedback if container config was changed before this game run
+                    if (configChanged) {
+                        // Clear the flag
+                        container.putExtra("config_changed", "false")
+                        container.saveData()
+                        // Show the feedback dialog
+                        _uiEvent.send(MainUiEvent.ShowGameFeedbackDialog(appId))
+                    }
             } catch (_: Exception) {
                 // ignore container errors
             }
@@ -363,7 +427,7 @@ class MainViewModel @Inject constructor(
                         if (!shouldLaunchRealSteam) {
                             SteamService.notifyRunningProcesses(it)
                         } else {
-                            Timber.i("Skipping Steam process notification - real Steam will handle this")
+                            Timber.tag("MainViewModel").i("Skipping Steam process notification - real Steam will handle this")
                         }
                     }
                 }
@@ -379,7 +443,7 @@ class MainViewModel @Inject constructor(
             setShowBootingSplash(false)
 
             // You could also show an error dialog here if needed
-            Timber.e("Game launch error: $error")
+            Timber.tag("MainViewModel").e("Game launch error: $error")
         }
     }
 
