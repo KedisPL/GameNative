@@ -7,12 +7,23 @@ import app.gamenative.R
 import app.gamenative.ui.component.settings.SettingsCPUList
 import app.gamenative.ui.component.settings.SettingsListDropdown
 import app.gamenative.ui.theme.settingsTileColors
+import app.gamenative.ui.theme.settingsTileColorsAlt
 import com.alorma.compose.settings.ui.SettingsGroup
+import com.alorma.compose.settings.ui.SettingsSwitch
 
 @Composable
 fun AdvancedTabContent(state: ContainerConfigState) {
     val config = state.config.value
     SettingsGroup() {
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = "Run as Root") },
+            subtitle = { Text(text = "Experimental: Requires rooted device") },
+            state = config.runAsRoot,
+            onCheckedChange = {
+                state.config.value = config.copy(runAsRoot = it)
+            },
+        )
         SettingsListDropdown(
             colors = settingsTileColors(),
             title = { Text(text = stringResource(R.string.startup_selection)) },
