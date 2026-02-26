@@ -168,7 +168,6 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.io.path.name
 import kotlin.text.lowercase
-import android.widget.Toast
 import com.winlator.contentdialog.TaskManagerDialog
 import com.winlator.PrefManager as WinlatorPrefManager
 
@@ -776,7 +775,7 @@ fun XServerScreen(
                 PluviaApp.touchpadView = TouchpadView(context, getxServer(), PrefManager.getBoolean("capture_pointer_on_external_mouse", true))
                 frameLayout.addView(PluviaApp.touchpadView)
                 PluviaApp.touchpadView?.setMoveCursorToTouchpoint(PrefManager.getBoolean("move_cursor_to_touchpoint", false))
-                
+
                 // Add invisible IME receiver to capture system keyboard input when keyboard is on external display
                 val imeDisplayContext = context.display?.let { display ->
                     context.createDisplayContext(display)
@@ -796,7 +795,7 @@ fun XServerScreen(
                 }
                 frameLayout.addView(imeReceiver)
                 imeInputReceiver = imeReceiver
-                
+
                 getxServer().winHandler = WinHandler(getxServer(), this)
                 win32AppWorkarounds = Win32AppWorkarounds(getxServer())
                 touchMouse = TouchMouse(getxServer())
@@ -2243,7 +2242,7 @@ private fun getWineStartCommand(
         val installPath = if (appIdInt != null) {
             app.gamenative.service.amazon.AmazonService.getInstallPathByAppId(appIdInt)
         } else null
-        
+
         if (installPath.isNullOrEmpty()) {
             Timber.tag("XServerScreen").e("Cannot launch: Amazon game not installed")
             return "\"explorer.exe\""

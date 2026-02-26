@@ -408,7 +408,7 @@ fun PluviaMain(
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            if (PrefManager.enableSteamLogin && !state.isSteamConnected && !isConnecting && !SteamService.isGameRunning) {
+            if (PrefManager.enableSteamLogin && !state.isSteamConnected && !isConnecting && !SteamService.keepAlive) {
                 Timber.d("[PluviaMain]: Steam not connected - attempt")
                 isConnecting = true
                 context.startForegroundService(Intent(context, SteamService::class.java))
